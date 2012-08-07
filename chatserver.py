@@ -3,14 +3,16 @@
 import struct
 from socket import *
 from socketserver import BaseRequestHandler, UDPServer
+import header
 
 class ChatUDPHandler(BaseRequestHandler):
   def handle(self):
     data = self.request[0].strip()
     socket = self.request[1]
 
-    print("{} wrote:".format(self.client_address[0]))
-    print(data)
+    msg = header.Message(data)
+    print("{} wrote:".format("anon" if msg.anon else msg.source))
+    print(msg.line)
     socket.sendto(data.upper(), self.client_address)
 
 if __name__ == "__main__":
