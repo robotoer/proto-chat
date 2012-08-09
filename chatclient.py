@@ -5,7 +5,7 @@ import re
 
 from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, IPPROTO_IP, IP_MULTICAST_TTL
 from message import *
-from constants import ALL, AMERICANS, RUSSIANS
+from constants import ALL, AMERICANS, RUSSIANS, GROUP
 
 # Get command line arguments.
 parser = argparse.ArgumentParser()
@@ -21,7 +21,7 @@ sock.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 2)
 audience  = ALL
 team      = { 'russian': 'r', 'american': 'a' }[args.team]
 name      = args.name
-port      = 59595
+group     = GROUP
 prompt    = 'All > '
 
 # Get the first line of input.
@@ -35,7 +35,7 @@ while line != '/quit':
       prompt = 'All > '
 
     # Switch to american teamchat.
-    elif re.match('^/uteam$', line):
+    elif re.match('^/ateam$', line):
       audience = AMERICANS
       prompt = 'AMERICANS > '
 
@@ -53,7 +53,7 @@ while line != '/quit':
     message = Message(name, team, line)
 
     # Send the message
-    sock.sendto(serialize(message), (audience, port))
+    sock.sendto(serialize(message), (group, audience))
 
   # Get the next line of input.
   line = input(prompt)
