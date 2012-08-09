@@ -1,15 +1,62 @@
 #!/usr/bin/env python3
 
-from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, IPPROTO_IP, IP_MULTICAST_TTL
-import header
+import argparse
+import re
 
+from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, IPPROTO_IP, IP_MULTICAST_TTL
+from message import *
+from constants import ALL, AMERICANS, RUSSIANS
+
+# Get command line arguments.
+parser = argparse.ArgumentParser()
+parser.add_argument('team', choices=['russian', 'american'], help='The allegiance of the player')
+parser.add_argument('name', help='The player name to use')
+args = parser.parse_args()
+
+# Create a multicast UDP socket.
 sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
 sock.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 2)
 
-line = input("All > ")
-while line != "/quit":
-  sock.sendto(header.head(bytes("me", "utf-8"), bytes("you", "utf-8"), False, True, bytes((line), "utf-8")), ("224.1.1.1", 59595))
-  line = input("All > ")
+# Set the program defaults.
+audience  = ALL
+team      = { 'russian': 'r', 'american': 'a' }[args.team]
+name      = args.name
+port      = 59595
+prompt    = 'All > '
+
+# Get the first line of input.
+line = input(prompt)
+while line != '/quit':
+  # Catch any command messages.
+  if line.startswith('/'):
+    # Switch to allchat
+    if re.match('^/all$', line):
+      audience = ALL
+      prompt = 'All > '
+
+    # Switch to american teamchat.
+    elif re.match('^/uteam$', line):
+      audience = AMERICANS
+      prompt = 'AMERICANS > '
+
+    # Switch to russian teamchat.
+    elif re.match('^/rteam$', line):
+      audience = RUSSIANS
+      prompt = 'RUSSIANS > '
+
+    # Unknown command.
+    else:
+      print('Unknown command: {}'.format(line))
+
+  else:
+    # Build a message object.
+    message = Message(name, team, line)
+
+    # Send the message
+    sock.sendto(serialize(message), (audience, port))
+
+  # Get the next line of input.
+  line = input(prompt)
 
 sock.close()
 
