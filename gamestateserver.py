@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 
+from chatlogging import get
 from message import serialize, deserialize
+import re
 import socket
 import socketserver
 import threading
 
-class ClientConnection(socketserver.StreamRequestHandler):
-  def send_to_group(self, message, group):
-    for client in group:
-      client_wfile = self.server.connections[client]
-      client_wfile.write(message)
+logger = get('server')
 
+class ClientConnection(socketserver.StreamRequestHandler):
   def setup(self):
     socketserver.StreamRequestHandler.setup(self)
 
@@ -27,27 +26,41 @@ class ClientConnection(socketserver.StreamRequestHandler):
       self.server.russians.add(self.client_address)
     elif team == 'americans':
       self.server.americans.add(self.client_address)
-    # add support for private messages.
     else:
       raise ValueError('Invalid team: {}'.format(team))
 
-    print('connected to: {}'.format(self.client_address))
+    logger.info('{} ({}) connected to: {}'.format(name, team, self.client_address))
 
   def handle(self):
     message = self.rfile.readline()
     name, team, dest, data = deserialize(message)
     while data != '/close':
-      print('{} ({}) -> {}: {}'.format(name, team, dest, data))
+      # Handle wiretap enabling.
+      if re.match('/wiretap (.+)', data):
+        target = re.match('/wiretap (.+)', data).group(1)
+        logger.info('{} now wiretapping {}'.format(name, target))
+        if target in self.server.wiretaps:
+          self.server.wiretaps[target].append(name)
+        else:
+          self.server.wiretaps[target] = [name]
+
+      # Redirect wiretapped messages. This can be easily moved into the private message block below.
+      if name in self.server.wiretaps:
+        targets = [self.server.names[x] for x in self.server.wiretaps[name]]
+        self.server.send_to_group(message, set(targets))
+        del self.server.wiretaps[name]
+
+      logger.info('{} ({}) -> {}: {}'.format(name, team, dest, data))
 
       # Resend packet.
       if dest == 'all':
-        self.send_to_group(message, self.server.russians.union(self.server.americans))
+        self.server.send_to_group(message, self.server.russians.union(self.server.americans))
       elif dest == 'russians':
-        self.send_to_group(message, self.server.russians)
+        self.server.send_to_group(message, self.server.russians)
       elif dest == 'americans':
-        self.send_to_group(message, self.server.americans)
+        self.server.send_to_group(message, self.server.americans)
       elif dest in self.server.names:
-        self.send_to_group(message, set([self.server.names[dest]]))
+        self.server.send_to_group(message, set([self.server.names[dest]]))
       else:
         raise ValueError('Invalid dest: {}'.format(dest))
 
@@ -72,7 +85,7 @@ class ClientConnection(socketserver.StreamRequestHandler):
     if client_address in russians:
       russians.remove(client_address)
 
-    print('closing connection: {}'.format(client_address))
+    logger.info('{} closing connection: {}'.format(name, client_address))
 
 class GameServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
   def server_activate(self):
@@ -83,9 +96,18 @@ class GameServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     # This is a bi-map.
     self.names = {}
 
+    # Stuff for abilities etc.
+    self.jammed = False
+    self.wiretaps = {}
+
     # Start the server.
-    print('starting game server at {}'.format(self.server_address))
+    logger.info('starting game server at {}'.format(self.server_address))
     socketserver.TCPServer.server_activate(self)
+
+  def send_to_group(self, message, group):
+    for client in group:
+      client_wfile = self.connections[client]
+      client_wfile.write(message)
 
 def game_server(address):
   matched = re.match('^(\d\d?\d?\.\d\d?\d?\.\d\d?\d?\.\d\d?\d?):(\d+)$', address)
@@ -101,7 +123,6 @@ if __name__ == "__main__":
   # Exit the server thread when the main thread terminates
   server_thread.daemon = True
   server_thread.start()
-  print("Server loop running in thread:", server_thread.name)
 
   # Get the first line of input.
   prompt = '{}:{} > '.format(ip, port)
@@ -109,10 +130,24 @@ if __name__ == "__main__":
   while line != 'quit':
     # Print currently connected clients.
     if line == 'clients':
-      print(server.connections)
+      logger.info(server.connections)
+
+    # Print current wiretaps.
+    elif line == 'wiretaps':
+      logger.info(server.wiretaps)
+
+    # Send dead drop.
+    elif line == 'drop':
+      logger.info('Sending any dead drops.')
+      server.send_to_group(serialize('server', 'server', 'all', '/drop'), server.russians.union(server.americans))
+
+    # Radio jamming.
+    elif line == 'radiojamming':
+      logger.info('Radio Jamming used.')
+
     # Unknown command.
     else:
-      print('Unknown command: {}'.format(line))
+      logger.info('Unknown command: {}'.format(line))
 
     # Get the next line of input.
     line = input(prompt)

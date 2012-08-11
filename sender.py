@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 
+from chatlogging import get
+from message import serialize, deserialize
 import argparse
 import re
 import socket
 import threading
 
-from message import serialize, deserialize
+logger = get('client')
 
 class ResponseHandler:
   def __init__(self, sock):
-    self.sock = sock
-    self.stop = False
+    self.sock   = sock
+    self.stop   = False
+    self.drop   = None
+    self.jammed = False
 
   def serve_forever(self):
     while not self.stop:
       name, team, dest, data = deserialize(self.sock.recv(1024))
-      print('{} ({}) -> {}: {}'.format(name, team, dest, data))
+      if data == '/drop' and self.drop != None:
+        sock.sendall(self.drop)
+        self.drop = None
+
+      if self.jammed:
+        logger.info('jammed -> {}: {}'.format(dest, data))
+      else:
+        logger.info('{} ({}) -> {}: {}'.format(name, team, dest, data))
 
 def game_server_socket(address):
   # Match the address string with a regular expression.
@@ -61,12 +72,30 @@ if __name__ == "__main__":
     while line != '/quit':
       # Catch any command messages.
       if line.startswith('/'):
-        if re.match('/channel (.*)', line):
-          dest = re.match('/channel (.*)', line).group(1)
+        if re.match('/channel (.+)', line):
+          dest = re.match('/channel (.+)', line).group(1)
           prompt = '{} > '.format(dest)
+
+        elif re.match('/drop (.+)', line):
+          drop_message = re.match('/drop (.+)', line).group(1)
+          response_handler.drop = serialize(name, team, dest, '/drop {}'.format(drop_message))
+
+        elif re.match('/effect (.+) (.*)', line):
+          matched = re.match('/effect (.+) (.*)', line)
+          effect = matched.group(1)
+          if effect == 'jamming':
+            response_handler.jammed = matched.group(2) == 'on'
+          else:
+            logger.warning('Unknown effect: {}'.format(effect))
+
+        elif re.match('/use wiretapping (.+)', line):
+          target = re.match('/use wiretapping (.+)', line).group(1)
+          logger.info('Wiretapping {}'.format(target))
+          sock.sendall(serialize(name, team, name, '/wiretap {}'.format(target)))
+
         else:
           # Unknown command.
-          print('Unknown command: {}'.format(line))
+          logger.warning('Unknown command: {}'.format(line))
 
       # Send a message.
       else:
